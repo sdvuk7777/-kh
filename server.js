@@ -1,23 +1,23 @@
 const express = require('express');
+const cors = require('cors');  // Import CORS
 const formidable = require('formidable');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const cors = require('cors');  // Import CORS middleware
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Enable CORS for all routes
+app.use(cors());
+
 // Telegram Bot Token
 const BOT_TOKEN = '6748460867:AAFzQkFcCfg1kqISiV4499pGxIcPtu4qe1w';
-
-// Enable CORS for all origins (You can configure this to allow specific origins if needed)
-app.use(cors());
 
 // Function to send file to Telegram
 async function sendFileToTelegram(telegramId, filePath) {
     const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendDocument`;
-
+    
     const formData = new FormData();
     formData.append('chat_id', telegramId);
     formData.append('document', fs.createReadStream(filePath));
@@ -32,6 +32,7 @@ async function sendFileToTelegram(telegramId, filePath) {
     }
 }
 
+// Route for file upload and sending to Telegram
 app.post('/send-to-telegram', (req, res) => {
     const form = new formidable.IncomingForm({ uploadDir: './uploads', keepExtensions: true });
 
@@ -58,6 +59,7 @@ app.post('/send-to-telegram', (req, res) => {
     });
 });
 
+// Start the server
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
