@@ -1,65 +1,114 @@
 const express = require('express');
-const cors = require('cors');  // Import CORS
-const formidable = require('formidable');
 const axios = require('axios');
+const cheerio = require('cheerio');
 const fs = require('fs');
 const path = require('path');
+const cron = require('node-cron');
+const cors = require('cors');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+app.use(cors()); // Enable CORS
 
-// Enable CORS for all routes
-app.use(cors());
+const DATA_DIR = './data';
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
 
-// Telegram Bot Token
-const BOT_TOKEN = '6748460867:AAFzQkFcCfg1kqISiV4499pGxIcPtu4qe1w';
+// Pre-defined URLs
+const urls = [
+  "https://alphanetwork.fun/next-topper/abhay-10th/?topic_id=26&type=live-class",
+  "https://alphanetwork.fun/next-topper/abhay-10th/?topic_id=28&type=live-class",
+  "https://alphanetwork.fun/next-topper/abhay-10th/?topic_id=34&type=live-class",
+  "https://alphanetwork.fun/next-topper/abhay-10th/?topic_id=3501&type=live-class",
+  "https://alphanetwork.fun/next-topper/abhay-10th/?topic_id=3511&type=live-class",
+  "https://alphanetwork.fun/next-topper/abhay-10th/?topic_id=350&type=live-class",
+  "https://alphanetwork.fun/next-topper/abhay-10th/?topic_id=351&type=live-class",
+  "https://alphanetwork.fun/next-topper/abhay-10th/?topic_id=365&type=live-class",
+  "https://alphanetwork.fun/next-topper/abhay-10th/?topic_id=364&type=live-class",
+  "https://alphanetwork.fun/next-topper/abhay-10th/?topic_id=363&type=live-class",
+  "https://alphanetwork.fun/next-topper/abhay-10th/?topic_id=362&type=live-class",
+  "https://alphanetwork.fun/next-topper/abhay-10th/?topic_id=361&type=live-class",
+  "https://alphanetwork.fun/next-topper/abhay-10th/?topic_id=37&type=live-class",
+  "https://alphanetwork.fun/next-topper/abhay-9th/?topic_id=32&type=live-class",
+  "https://alphanetwork.fun/next-topper/abhay-9th/?topic_id=31&type=live-class",
+  "https://alphanetwork.fun/next-topper/abhay-9th/?topic_id=27&type=live-class",
+  "https://alphanetwork.fun/next-topper/abhay-9th/?topic_id=38&type=live-class",
+  "https://alphanetwork.fun/next-topper/abhay-9th/?topic_id=39&type=live-class",
+  "https://alphanetwork.fun/next-topper/abhay-9th/?topic_id=40&type=live-class"
+];
 
-// Function to send file to Telegram
-async function sendFileToTelegram(telegramId, filePath) {
-    const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendDocument`;
-    
-    const formData = new FormData();
-    formData.append('chat_id', telegramId);
-    formData.append('document', fs.createReadStream(filePath));
-
-    try {
-        const response = await axios.post(url, formData, {
-            headers: formData.getHeaders(),
-        });
-        return response.data;
-    } catch (error) {
-        return { ok: false, error: error.message };
-    }
+// Helper function to fetch and save HTML
+async function fetchAndSaveHTML(url, filename) {
+  try {
+    const { data: html } = await axios.get(url);
+    fs.writeFileSync(path.join(DATA_DIR, `${filename}.html`), html, 'utf-8');
+    console.log(`Saved: ${filename}.html`);
+  } catch (error) {
+    console.error(`Error fetching ${url}:`, error.message);
+  }
 }
 
-// Route for file upload and sending to Telegram
-app.post('/send-to-telegram', (req, res) => {
-    const form = new formidable.IncomingForm({ uploadDir: './uploads', keepExtensions: true });
+// Function to download all pages
+async function downloadAllPages() {
+  console.log('Downloading pages...');
+  for (const url of urls) {
+    const topicId = new URL(url).searchParams.get('topic_id');
+    const batch = url.includes('abhay-10th') ? 'abhay-10th' : 'abhay-9th';
+    const filename = `${batch}${topicId}`;
+    await fetchAndSaveHTML(url, filename);
+  }
+  console.log('All pages downloaded.');
+}
 
-    form.parse(req, async (err, fields, files) => {
-        if (err) {
-            return res.status(500).json({ message: 'File upload failed.' });
-        }
+// Extract data from HTML
+function extractDataFromHTML(filePath) {
+  const html = fs.readFileSync(filePath, 'utf-8');
+  const $ = cheerio.load(html);
+  const result = [];
 
-        const telegramId = fields.telegramID;
-        const file = files.file;
-        const filePath = path.join(__dirname, file.path);
+  $('.video-card').each((_, element) => {
+    const lessonUrl = $(element).attr('data-lesson-url');
+    const videoTitle = $(element).find('img').attr('alt');
+    if (lessonUrl && videoTitle) {
+      result.push({ title: videoTitle, url: lessonUrl });
+    }
+  });
 
-        // Send file to Telegram
-        const response = await sendFileToTelegram(telegramId, filePath);
+  return result;
+}
 
-        // Remove uploaded file after sending
-        fs.unlinkSync(filePath);
+// Schedule task to delete old files and download new ones at midnight
+cron.schedule('0 0 * * *', async () => {
+  console.log('Deleting old files and downloading new ones...');
+  
+  // Delete old files
+  fs.readdirSync(DATA_DIR).forEach(file => {
+    fs.unlinkSync(path.join(DATA_DIR, file));
+  });
 
-        if (response.ok) {
-            res.json({ message: 'File sent successfully to your Telegram!' });
-        } else {
-            res.status(500).json({ message: `Failed to send file. Error: ${response.error}` });
-        }
-    });
+  // Download new files
+  await downloadAllPages();
 });
 
-// Start the server
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+// List all downloaded files
+app.get('/home', (req, res) => {
+  const files = fs.readdirSync(DATA_DIR).map(file => file.replace('.html', ''));
+  res.json({ files });
+});
+
+// Serve data from a specific HTML file
+app.get('/page-data/:filename', (req, res) => {
+  const filename = req.params.filename;
+  const filePath = path.join(DATA_DIR, `${filename}.html`);
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: "File not found" });
+  }
+
+  const data = extractDataFromHTML(filePath);
+  res.json({ data });
+});
+
+app.listen(3000, () => {
+  console.log('Server running on port 3000');
+  // Initial download on server start
+  downloadAllPages();
 });
