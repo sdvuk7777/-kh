@@ -1,5 +1,5 @@
 {
-  "name": "txt-api",
+  "name": "auto-html-downloader",
   "version": "1.0.0",
   "description": "A Node.js API to automatically download and extract HTML data from multiple URLs",
   "main": "server.js",
